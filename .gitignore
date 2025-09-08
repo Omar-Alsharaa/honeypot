@@ -1,0 +1,13 @@
+# Runtime artifacts
+honeypot.log
+honeypot.pid
+honeypot_scores.jsonl
+
+# Python
+__pycache__/
+*.py[cod]
+.env
+
+# Editor
+.vscode/
+.DS_Store

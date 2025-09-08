@@ -1,0 +1,2 @@
+{"proto": "http", "ip": "127.0.0.1", "request": ["GET / HTTP/1.1", "Host: localhost", "", ""], "raw": "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n", "ts": "2025-09-07T23:18:29.164896Z"}
+{"proto": "ssh", "ip": "127.0.0.1", "banner_sent": "SSH-2.0-OpenSSH_4.3p2 Debian-3ubuntu5", "payload": "", "ts": "2025-09-07T23:18:29.166486Z"}

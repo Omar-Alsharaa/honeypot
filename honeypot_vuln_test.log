@@ -1,0 +1,1 @@
+{"proto": "http", "ip": "127.0.0.1", "request": "GET /vuln?payload=show_flag HTTP/1.1", "raw": "GET /vuln?payload=show_flag HTTP/1.1\r\nHost: localhost\r\n\r\n", "vuln_attempt": {"payload": "show_flag", "outcome": {"exposed_flag": true, "message": "flag revealed", "flag": "FLAG{lab-simulated-12345}"}}, "ts": "2025-09-07T23:21:25.314877Z"}

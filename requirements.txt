@@ -1,0 +1,3 @@
+# Optional: psutil is used by stop_honeypot for a graceful stop on Windows
+# Not required; Windows termination uses ctypes fallback.
+psutil>=5.9 ; platform_system=='Windows'
