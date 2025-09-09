@@ -3,6 +3,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 import argparse
+import aiofiles
 import urllib.parse
 
 DEFAULT_SSH_BANNER = b"SSH-2.0-OpenSSH_4.3p2 Debian-3ubuntu5"
@@ -27,10 +28,10 @@ class JSONLogger:
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
-    def log(self, entry: dict):
+    async def log(self, entry: dict):
         entry.setdefault("ts", datetime.utcnow().isoformat() + "Z")
-        with self.path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        async with aiofiles.open(self.path, "a", encoding="utf-8") as f:
+            await f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
 async def handle_ssh(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, logger: JSONLogger):
@@ -43,7 +44,7 @@ async def handle_ssh(reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
         data = await asyncio.wait_for(reader.read(1024), timeout=5.0)
     except asyncio.TimeoutError:
         data = b""
-    logger.log({
+    await logger.log({
         "proto": "ssh",
         "ip": ip,
         "banner_sent": DEFAULT_SSH_BANNER.decode('utf-8', errors='replace'),
@@ -52,8 +53,9 @@ async def handle_ssh(reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
     try:
         writer.close()
         await writer.wait_closed()
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+        logging.warning(f"Error closing SSH writer: {e}")
 
 
 def _simulate_vulnerability(payload: str, challenge: str = None):
@@ -109,17 +111,22 @@ async def handle_http(reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     except asyncio.TimeoutError:
         data = b""
     req_text = data.decode('utf-8', errors='replace')
-    # basic request parsing
-    first_line = req_text.splitlines()[0] if req_text else ''
-    parts = first_line.split()
-    path = parts[1] if len(parts) > 1 else '/'
+    # Improved HTTP request parsing
+    try:
+        first_line = req_text.splitlines()[0] if req_text else ''
+        parts = first_line.split()
+        path = parts[1] if len(parts) > 1 else '/'
+    except Exception as e:
+        path = '/'
+        import logging
+        logging.warning(f"Malformed HTTP request from {ip}: {e}")
     parsed = urllib.parse.urlparse(path)
     qs = urllib.parse.parse_qs(parsed.query)
 
     log_entry = {
         "proto": "http",
         "ip": ip,
-        "request": first_line,
+        "request": first_line if 'first_line' in locals() else '',
         "raw": req_text,
     }
 
@@ -151,15 +158,15 @@ async def handle_http(reader: asyncio.StreamReader, writer: asyncio.StreamWriter
                     'points': outcome.get('points', 0),
                     'challenge': challenge
                 }
-                with score_path.open('a', encoding='utf-8') as sf:
-                    sf.write(json.dumps(score_entry, ensure_ascii=False) + '\n')
-            except Exception:
-                # never raise from logging
-                pass
+                async with aiofiles.open(score_path, 'a', encoding='utf-8') as sf:
+                    await sf.write(json.dumps(score_entry, ensure_ascii=False) + '\n')
+            except Exception as e:
+                import logging
+                logging.warning(f"Error writing score entry: {e}")
         else:
             body = f"<html><body><h1>Vulnerable App</h1><p>{outcome.get('message')}</p></body></html>"
 
-    logger.log(log_entry)
+    await logger.log(log_entry)
 
     resp = (
         "HTTP/1.1 200 OK\r\n"
@@ -173,8 +180,9 @@ async def handle_http(reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     try:
         writer.close()
         await writer.wait_closed()
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+        logging.warning(f"Error closing HTTP writer: {e}")
 
 
 async def start_servers(ssh_port: int, http_port: int, log_path: str, enable_vuln: bool = False):
