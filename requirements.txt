@@ -1,3 +1,8 @@
+aiofiles>=23.0.0
+pytest>=7.0.0
+# Optional: psutil is used by stop_honeypot for a graceful stop on Windows
+# Not required; Windows termination uses ctypes fallback.
+psutil>=5.9 ; platform_system=='Windows'
 # Optional: psutil is used by stop_honeypot for a graceful stop on Windows
 # Not required; Windows termination uses ctypes fallback.
 psutil>=5.9 ; platform_system=='Windows'

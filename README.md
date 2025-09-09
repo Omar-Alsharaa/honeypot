@@ -1,11 +1,12 @@
+pip install -r requirements.txt
+python -m pytest
+python scripts/run_honeypot.py --enable-vuln
+
 # Custom Honeypot
 
 This project implements a simple, local honeypot that simulates vulnerable SSH and HTTP services for lab/learning purposes only.
 
 WARNING: Run this only in an isolated lab or VM, not on a public-facing host.
-
-Files:
-
 
 Vulnerable simulation
 ---------------------
@@ -15,7 +16,7 @@ This honeypot can simulate a safe, training-only vulnerable endpoint at `/vuln` 
 Usage example (enable vuln):
 
 ```powershell
-python -u "d:\New folder\scripts\run_honeypot.py" --ssh-port 2222 --http-port 8080 --log "d:\New folder\honeypot.log" --enable-vuln &
+python -u "d:\New folder\scripts\run_honeypot.py" --ssh-port 2222 --http-port 8080 --log "d:\New folder\honeypot.log" --enable-vuln
 ```
 
 Then an attacker (or student) can probe `/vuln`:
@@ -41,7 +42,7 @@ Usage (PowerShell):
 ```powershell
 # start
 python "d:\New folder\scripts\start_honeypot.py"
-
+```
 
 Hints for people who find it hard to start
 -----------------------------------------
@@ -71,12 +72,9 @@ Invoke-WebRequest -Uri 'http://127.0.0.1:8080/vuln?payload=show_flag' -UseBasicP
 
 # view leaderboard
 python "d:\New folder\scripts\leaderboard.py"
+```
 
-- If Start-Process fails because of spaces in paths, use the helper which quotes paths for you:
-
-```powershell
-
-# stop
+- If Start-Process fails because of spaces in paths, use the helper which quotes paths for you.
 
 - Web UI troubleshooting:
 	- The UI runs on port 9000. Use http://127.0.0.1:9000.
