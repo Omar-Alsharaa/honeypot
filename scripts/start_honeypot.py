@@ -1,3 +1,4 @@
+import os
 import subprocess
 from pathlib import Path
 import sys
@@ -7,6 +8,8 @@ log = here / 'honeypot.log'
 pidfile = here / 'honeypot.pid'
 script = here / 'scripts' / 'run_honeypot.py'
 
+scenario = os.environ.get('HONEYPOT_SCENARIO', 'web-basic')
+
 args = [
     sys.executable,
     '-u',
@@ -14,10 +17,12 @@ args = [
     '--ssh-port', '2222',
     '--http-port', '8080',
     '--log', str(log),
+    '--scenario', scenario,
     '--enable-vuln'
 ]
 proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=str(here))
 print('Started process PID', proc.pid)
 pidfile.write_text(str(proc.pid))
 print('Wrote PID to', pidfile)
+print('Scenario preset:', scenario)
 print('Process output will not be tailed by this script. Use Get-Content -Path "{}" -Tail 200 -Wait to follow logs.'.format(log))

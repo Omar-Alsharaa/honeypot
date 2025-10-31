@@ -11,6 +11,7 @@ def analyze(logfile: str, top: int = 10):
         return
     ips = Counter()
     proto_count = Counter()
+    scenario_count = Counter()
     samples = defaultdict(list)
     with p.open('r', encoding='utf-8') as f:
         for line in f:
@@ -20,6 +21,12 @@ def analyze(logfile: str, top: int = 10):
                 continue
             ips[j.get('ip','-')] += 1
             proto_count[j.get('proto','-')] += 1
+            scenario = j.get('scenario')
+            if not scenario:
+                va = j.get('vuln_attempt', {})
+                scenario = va.get('scenario')
+            if scenario:
+                scenario_count[scenario] += 1
             samples[j.get('ip','-')].append(j)
     print('Top IPs:')
     for ip, cnt in ips.most_common(top):
@@ -27,6 +34,11 @@ def analyze(logfile: str, top: int = 10):
     print('\nBy protocol:')
     for p_name, cnt in proto_count.items():
         print(f'  {p_name}: {cnt}')
+    if scenario_count:
+        print('\nBy scenario:')
+        for scen, cnt in scenario_count.most_common():
+            print(f'  {scen}: {cnt}')
+
     print('\nSample events (one per top IP):')
     for ip, _ in ips.most_common(5):
         print('\n==', ip)

@@ -6,6 +6,8 @@ import argparse
 import aiofiles
 import urllib.parse
 
+from honeypot.scenarios import get_scenario, list_scenarios
+
 DEFAULT_SSH_BANNER = b"SSH-2.0-OpenSSH_4.3p2 Debian-3ubuntu5"
 
 # A simulated "flag" for lab exercises. This is safe because it is never
@@ -71,7 +73,9 @@ def _simulate_vulnerability(payload: str, challenge: str = None):
         'flag': 50,
         'sqlinjection': 30,
         'lfi': 20,
-        'rce': 100
+        'rce': 100,
+        'xss': 25,
+        'bruteforce': 10,
     }
     # detect flag trigger
     if any(k in p for k in ("show_flag", "flag{", "give_me_flag")):
@@ -83,6 +87,19 @@ def _simulate_vulnerability(payload: str, challenge: str = None):
     # SQLi patterns
     if 'union select' in p or ' or 1=1' in p or 'sqlmap' in p:
         outcome.update({"message": "simulated SQL injection detected", "points": base['sqlinjection'], "vuln": 'sqlinjection'})
+        if challenge and challenge in CHALLENGES:
+            outcome['points'] = int(outcome['points'] * CHALLENGES[challenge]['mult'])
+        return outcome
+    # reflected XSS patterns (safe simulation)
+    if any(tok in p for tok in ("<script", "alert(", "onerror=")):
+        outcome.update({"message": "simulated XSS payload reflected", "points": base['xss'], "vuln": 'xss'})
+        if challenge and challenge in CHALLENGES:
+            outcome['points'] = int(outcome['points'] * CHALLENGES[challenge]['mult'])
+        outcome['reflected'] = payload
+        return outcome
+    # brute force markers
+    if any(tok in p for tok in ("password=", "admin:", "root:", "hydra")):
+        outcome.update({"message": "simulated brute-force attempt logged", "points": base['bruteforce'], "vuln": 'bruteforce'})
         if challenge and challenge in CHALLENGES:
             outcome['points'] = int(outcome['points'] * CHALLENGES[challenge]['mult'])
         return outcome
@@ -103,7 +120,13 @@ def _simulate_vulnerability(payload: str, challenge: str = None):
     return outcome
 
 
-async def handle_http(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, logger: JSONLogger, enable_vuln: bool = False):
+async def handle_http(
+    reader: asyncio.StreamReader,
+    writer: asyncio.StreamWriter,
+    logger: JSONLogger,
+    enable_vuln: bool = False,
+    scenario_name: str = "baseline",
+):
     peer = writer.get_extra_info('peername')
     ip = peer[0] if peer else 'unknown'
     try:
@@ -123,14 +146,36 @@ async def handle_http(reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     parsed = urllib.parse.urlparse(path)
     qs = urllib.parse.parse_qs(parsed.query)
 
+    try:
+        scenario = get_scenario(scenario_name)
+    except KeyError:
+        scenario = get_scenario("baseline")
+
     log_entry = {
         "proto": "http",
         "ip": ip,
         "request": first_line if 'first_line' in locals() else '',
         "raw": req_text,
+        "scenario": scenario.name,
     }
 
-    body = "<html><body><h1>Apache/2.2.8 (Ubuntu) Server at example.com</h1><p>Welcome</p></body></html>"
+    objectives = "".join(f"<li>{obj}</li>" for obj in scenario.objectives)
+    hints = "".join(f"<li>{hint}</li>" for hint in scenario.hints)
+    body = (
+        "<html><body>"
+        f"<h1>{scenario.title}</h1>"
+        f"<p>{scenario.description}</p>"
+        "<h2>Objectives</h2><ul>"
+        f"{objectives}"
+        "</ul>"
+        "<h2>Suggested Tools & Tips</h2><ul>"
+        f"{hints}"
+        "</ul>"
+        "<h2>Recommended Challenge Presets</h2>"
+        f"<p>{', '.join(scenario.recommended_challenges)}</p>"
+        "<p>Append <code>?payload=show_flag</code> or other payloads to /vuln when the lab is enabled.</p>"
+        "</body></html>"
+    )
 
     # Vulnerable simulation: only active when enabled by the operator
     if enable_vuln and parsed.path.startswith('/vuln'):
@@ -144,7 +189,12 @@ async def handle_http(reader: asyncio.StreamReader, writer: asyncio.StreamWriter
         challenge = qs.get('challenge', ['normal'])[0]
         # pass challenge to simulation and recalc outcome
         outcome = _simulate_vulnerability(payload, challenge=challenge)
-        log_entry['vuln_attempt'] = {'payload': payload, 'outcome': outcome, 'challenge': challenge}
+        log_entry['vuln_attempt'] = {
+            'payload': payload,
+            'outcome': outcome,
+            'challenge': challenge,
+            'scenario': scenario.name,
+        }
         if outcome.get('exposed_flag'):
             body = f"<html><body><h1>Secret</h1><pre>{outcome.get('flag')}</pre><p>Points: {outcome.get('points')}</p></body></html>"
             # record scoring event to a scoreboard file next to the main log
@@ -156,7 +206,8 @@ async def handle_http(reader: asyncio.StreamReader, writer: asyncio.StreamWriter
                     'payload': payload,
                     'flag': outcome.get('flag'),
                     'points': outcome.get('points', 0),
-                    'challenge': challenge
+                    'challenge': challenge,
+                    'scenario': scenario.name,
                 }
                 async with aiofiles.open(score_path, 'a', encoding='utf-8') as sf:
                     await sf.write(json.dumps(score_entry, ensure_ascii=False) + '\n')
@@ -185,14 +236,31 @@ async def handle_http(reader: asyncio.StreamReader, writer: asyncio.StreamWriter
         logging.warning(f"Error closing HTTP writer: {e}")
 
 
-async def start_servers(ssh_port: int, http_port: int, log_path: str, enable_vuln: bool = False):
+async def start_servers(
+    ssh_port: int,
+    http_port: int,
+    log_path: str,
+    enable_vuln: bool = False,
+    scenario: str = "baseline",
+):
     logger = JSONLogger(Path(log_path))
     loop = asyncio.get_running_loop()
+    try:
+        scenario_obj = get_scenario(scenario)
+    except KeyError:
+        print(f"[!] Unknown scenario '{scenario}', falling back to 'baseline'")
+        scenario_obj = get_scenario("baseline")
     ssh_server = await asyncio.start_server(lambda r, w: handle_ssh(r, w, logger), host='0.0.0.0', port=ssh_port)
-    http_server = await asyncio.start_server(lambda r, w: handle_http(r, w, logger, enable_vuln), host='0.0.0.0', port=http_port)
+    http_server = await asyncio.start_server(
+        lambda r, w: handle_http(r, w, logger, enable_vuln, scenario_obj.name),
+        host='0.0.0.0',
+        port=http_port,
+    )
 
     print(f"[+] SSH fake server listening on {ssh_port}")
-    print(f"[+] HTTP fake server listening on {http_port} (vuln={'enabled' if enable_vuln else 'disabled'})")
+    print(
+        f"[+] HTTP fake server listening on {http_port} (vuln={'enabled' if enable_vuln else 'disabled'}, scenario={scenario_obj.title})"
+    )
     try:
         async with ssh_server, http_server:
             await asyncio.gather(ssh_server.serve_forever(), http_server.serve_forever())
@@ -206,8 +274,23 @@ if __name__ == '__main__':
     parser.add_argument('--http-port', type=int, default=8080)
     parser.add_argument('--log', type=str, default='honeypot.log')
     parser.add_argument('--enable-vuln', action='store_true', help='Enable the simulated vulnerable HTTP endpoint at /vuln')
+    parser.add_argument('--scenario', default='baseline', help='Training scenario to describe in the web UI and logs')
+    parser.add_argument('--list-scenarios', action='store_true', help='List available scenario presets and exit')
     args = parser.parse_args()
+
+    if args.list_scenarios:
+        for scenario in list_scenarios():
+            print(f"{scenario.name}\n  Title: {scenario.title}\n  Description: {scenario.description}\n  Recommended challenges: {', '.join(scenario.recommended_challenges)}\n")
+        raise SystemExit(0)
     try:
-        asyncio.run(start_servers(args.ssh_port, args.http_port, args.log, enable_vuln=args.enable_vuln))
+        asyncio.run(
+            start_servers(
+                args.ssh_port,
+                args.http_port,
+                args.log,
+                enable_vuln=args.enable_vuln,
+                scenario=args.scenario,
+            )
+        )
     except KeyboardInterrupt:
         print('\nShutting down')
